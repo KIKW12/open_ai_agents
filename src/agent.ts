@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { WorkflowInput, WorkflowOutput } from "./types.js";
 
 // Tool definitions
-const mcp = hostedMcpTool({
+export const mcp = hostedMcpTool({
     serverLabel: "mcp_v1_7",
     allowedTools: [
         "get_conceptos_cea",
@@ -26,158 +26,10 @@ const mcp = hostedMcpTool({
     serverUrl: "https://tools.fitcluv.com/mcp/9649689d-dd88-4bb8-b9f1-94b3d604ccda"
 });
 
-// Standalone ticket creation function
-async function performCreateTicket({ service_type, titulo, descripcion, contract_number, email, ubicacion }: {
-    service_type: string,
-    titulo: string,
-    descripcion: string,
-    contract_number: string | null,
-    email: string | null,
-    ubicacion: string | null
-}) {
-    try {
-        // Generate a local folio FIRST as a fallback
-        const localFolio = generateTicketId(service_type as keyof typeof TICKET_TYPES);
+// Ticket logic removed - using direct MCP calls
+// ...
 
-        // Prepare ticket data WITHOUT folio - let Supabase auto-generate it (but we have our local fallback)
-        const ticketData: any = {
-            user_id: "00d7d94c-a0ac-4b55-8767-5a553d80b39a",
-            service_type,
-            titulo,
-            descripcion,
-            status: "abierto"
-        };
-
-        if (contract_number) ticketData.contract_number = contract_number;
-        if (email) ticketData.email = email;
-        if (ubicacion) ticketData.ubicacion = ubicacion;
-
-        console.log(`[TICKET] Creating ticket in MCP:`, ticketData);
-
-        // Call MCP Crear_ticket to persist the ticket and get auto-generated folio
-        let folio = localFolio; // Default to local folio
-        try {
-            const mcpResponse = await fetch("https://tools.fitcluv.com/mcp/9649689d-dd88-4bb8-b9f1-94b3d604ccda", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream"
-                },
-                body: JSON.stringify({
-                    jsonrpc: "2.0",
-                    method: "tools/call",
-                    params: {
-                        name: "Crear_ticket",
-                        arguments: ticketData
-                    },
-                    id: Date.now()
-                })
-            });
-
-            const mcpResult = await mcpResponse.json();
-            console.log(`[TICKET] MCP response:`, JSON.stringify(mcpResult, null, 2));
-
-            if (mcpResult.error) {
-                console.error(`[TICKET] MCP error:`, mcpResult.error);
-                // We'll use the local folio if MCP fails
-            } else if (mcpResult.result && mcpResult.result.content) {
-                // Extract folio from the MCP response
-                const content = mcpResult.result.content;
-                if (Array.isArray(content) && content[0]?.text) {
-                    const textContent = content[0].text;
-                    const folioMatch = textContent.match(/folio[:\s]+([A-Z0-9\-]+)/i);
-                    if (folioMatch) {
-                        folio = folioMatch[1];
-                        console.log(`[TICKET] Using MCP-generated folio: ${folio}`);
-                    }
-                }
-            }
-        } catch (mcpError) {
-            console.error(`[TICKET] Failed to call MCP:`, mcpError);
-            // Use local folio as fallback
-        }
-
-        console.log(`[TICKET] Ticket created with final folio: ${folio}`);
-
-        return {
-            success: true,
-            folio,
-            message: `Ticket created successfully with folio ${folio}`
-        };
-    } catch (error) {
-        console.error("[TICKET] Error creating ticket:", error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-            message: "Error creating ticket"
-        };
-    }
-}
-
-// Custom ticket creation tool
-const createTicketTool = tool({
-    name: "create_cea_ticket",
-    description: "Creates a ticket in the CEA system and returns the generated folio number. Use this instead of Crear_ticket to ensure you get the folio before responding to the user.",
-    parameters: z.object({
-        service_type: z.enum(["fuga", "aclaraciones", "pagos", "lecturas", "revision_recibo", "recibo_digital", "urgente"]).describe("Type of ticket"),
-        titulo: z.string().describe("Title of the ticket"),
-        descripcion: z.string().describe("Detailed description of the issue"),
-        contract_number: z.string().nullable().describe("Contract number if applicable").default(null),
-        email: z.string().nullable().describe("Email if applicable").default(null),
-        ubicacion: z.string().nullable().describe("Location if applicable").default(null)
-    }),
-    execute: async (args) => {
-        return performCreateTicket(args);
-    }
-});
-
-// Ticket type mapping
-const TICKET_TYPES = {
-    fuga: "FUG",
-    aclaraciones: "ACL",
-    pagos: "PAG",
-    lecturas: "LEC",
-    revision_recibo: "REV",
-    recibo_digital: "DIG",
-    urgente: "URG"
-} as const;
-
-// Ticket counter store (in-memory, resets on restart)
-// Format: Map<"YYMMDD-TYPE", number>
-const ticketCounterStore = new Map<string, number>();
-
-/**
- * Generates a ticket ID following the nomenclature: CEA-[TYPE]-[YYMMDD]-[NNNN]
- * @param ticketType - The type of ticket (fuga, pagos, aclaraciones, etc.)
- * @returns The generated ticket ID
- */
-export function generateTicketId(ticketType: keyof typeof TICKET_TYPES): string {
-    const typeCode = TICKET_TYPES[ticketType];
-
-    // Get current date in Mexico City timezone
-    const now = new Date();
-    const mexicoDate = new Date(now.toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
-
-    // Format date as YYMMDD
-    const year = mexicoDate.getFullYear().toString().slice(-2);
-    const month = String(mexicoDate.getMonth() + 1).padStart(2, '0');
-    const day = String(mexicoDate.getDate()).padStart(2, '0');
-    const dateStr = `${year}${month}${day}`;
-
-    // Generate counter key
-    const counterKey = `${dateStr}-${typeCode}`;
-
-    // Get and increment counter
-    const currentCount = ticketCounterStore.get(counterKey) || 0;
-    const newCount = currentCount + 1;
-    ticketCounterStore.set(counterKey, newCount);
-
-    // Format counter as 4-digit number
-    const counterStr = String(newCount).padStart(4, '0');
-
-    // Generate final ticket ID
-    return `CEA-${typeCode}-${dateStr}-${counterStr}`;
-}
+// Ticket generation logic removed
 
 // Shared client for guardrails (lazy initialization)
 let _client: OpenAI | null = null;
@@ -210,9 +62,23 @@ async function runWithAutoApproval(runner: any, agent: any, history: AgentInputI
     let currentHistory = [...history];
     let result = await runner.run(agent, currentHistory);
 
+
+    // DEBUG: Log result steps
+    for (const item of result.newItems || []) {
+        if (item.rawItem.role === 'tool' || item.rawItem.type === 'hosted_tool_call') {
+            console.log(`[AutoApproval] Step item (${item.rawItem.role || item.rawItem.type}):`, JSON.stringify(item.rawItem, null, 2));
+        }
+    }
+
     let loops = 0;
     while (result.currentStep?.type === "next_step_interruption" && loops < 5) {
         console.log(`[AutoApproval] Interruption detected (loop ${loops})`);
+
+        // DEBUG: Log interruptions
+        if (result.currentStep.data.interruptions) {
+            console.log(`[AutoApproval] Interruptions data:`, JSON.stringify(result.currentStep.data.interruptions, null, 2));
+        }
+
         loops++;
         const interruptions = result.currentStep.data.interruptions;
         let hasApprovals = false;
@@ -243,6 +109,13 @@ async function runWithAutoApproval(runner: any, agent: any, history: AgentInputI
         currentHistory.push(...approvedItems);
 
         result = await runner.run(agent, currentHistory);
+
+        // DEBUG: Log result steps after re-run
+        for (const item of result.newItems || []) {
+            if (item.rawItem.role === 'tool' || item.rawItem.type === 'hosted_tool_call') {
+                console.log(`[AutoApproval] Step item (${item.rawItem.role || item.rawItem.type}):`, JSON.stringify(item.rawItem, null, 2));
+            }
+        }
     }
 
     if (loops >= 5) {
@@ -505,7 +378,7 @@ PAYMENT ASSISTANCE:
 DIGITAL RECEIPT CHANGE:
 When user requests digital receipt:
 1. Confirm email and contract number
-2. Create ticket with create_cea_ticket:
+2. Create ticket with Crear_ticket:
    - service_type: "recibo_digital"
    - titulo: "Cambio a recibo digital - Contrato [numero]"
    - descripcion: Contract number and email
@@ -514,11 +387,15 @@ When user requests digital receipt:
 3. The tool returns the folio. Use it in your response: "He creado tu solicitud con folio [FOLIO]. Tu recibo se enviará a: [email]. ¡Gracias por ahorrar papel!"
 
 PAYMENT ISSUES:
-For disputes, create ticket with create_cea_ticket using service_type: "pagos"
+For disputes, create ticket with 'Crear_ticket' using:
+- fieldValues0_Field_Value: "pago_recibo"
+- fieldValues1_Field_Value: "PAG"
+- fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a" (or lookup customer first)
+- fieldValues8_Field_Value: Contract Number (required)
 
 Do not retrieve contracts by name or address - contract number only.`,
     model: "gpt-4.1",
-    tools: [mcp, createTicketTool],
+    tools: [mcp],
     modelSettings: {
         temperature: 0.7,
         topP: 1,
@@ -541,14 +418,19 @@ WORKFLOW:
 DISPUTES:
 If user disputes consumption or suspects meter reading error:
 1. Gather: contract number, month(s), specific issue
-2. Create ticket with create_cea_ticket:
-   - service_type: "lecturas" (meter issues) OR "revision_recibo" (receipt review) OR "aclaraciones" (clarifications)
-   - titulo: "Revisión de lectura - Contrato [numero] - [mes]"
-   - descripcion: All dispute details
-   - contract_number: [numero]
-3. The tool returns the folio. Include it in your response to the user.`,
+3. Create ticket with 'Crear_ticket':
+    - fieldValues0_Field_Value: "reportar_lectura"
+    - fieldValues1_Field_Value: "LEC" (or "REV")
+    - fieldValues2_Field_Value: "abierto"
+    - fieldValues3_Field_Value: "media"
+    - fieldValues5_Field_Value: Title
+    - fieldValues6_Field_Value: Description
+    - fieldValues7_Field_Value: Name (or "Usuario No Identificado")
+    - fieldValues8_Field_Value: Contract Number
+    - fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a" (or lookup customer first)
+4. The tool returns the folio. Include it in your response to the user.`,
     model: "gpt-4.1",
-    tools: [mcp, createTicketTool],
+    tools: [mcp],
     modelSettings: {
         temperature: 0.7,
         topP: 1,
@@ -569,18 +451,23 @@ INFORMACIÓN NECESARIA:
 3. Gravedad de la fuga (si no es evidente en foto)
 
 CREAR TICKET:
-Cuando tengas toda la info, usa create_cea_ticket:
-- service_type: "fuga"
-- titulo: Título descriptivo (ej: "Fuga en vía pública - [ubicación]")
-- descripcion: Todos los detalles (ubicación, gravedad, tipo de vía)
-- ubicacion: La ubicación exacta
+Cuando tengas toda la info, usa 'Crear_ticket' con estos parametros EXACTOS:
+- fieldValues0_Field_Value: "reportes_fugas"
+- fieldValues1_Field_Value: "FUG"
+- fieldValues2_Field_Value: "abierto"
+- fieldValues3_Field_Value: "media" (o "alta" si es grave)
+- fieldValues5_Field_Value: Título (ej: "Fuga en vía pública...")
+- fieldValues6_Field_Value: Descripción completa.
+- fieldValues7_Field_Value: "Usuario No Identificado" (si no tienes nombre)
+- fieldValues8_Field_Value: "0" (si no tienes contrato)
+- fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a" (ID genérico si no tienes uno específico)
 
-El tool te devolverá el folio generado. DEBES incluir ese folio en tu respuesta al usuario.
-Ejemplo: "He creado tu reporte con el folio CEA-FUG-251226-0001. Un técnico se pondrá en contacto contigo pronto."
+    El tool te devolverá el resultado. Si recibes un folio en la respuesta, comunícaselo al usuario.
+    Ejemplo: "He creado tu reporte con el folio [FOLIO]. Un técnico se pondrá en contacto contigo pronto."
 
-NO pidas número de contrato para fugas.`,
+    NO pidas número de contrato para fugas.`,
     model: "gpt-4.1",
-    tools: [mcp, createTicketTool],
+    tools: [mcp],
     modelSettings: {
         temperature: 0.7,
         topP: 1,
@@ -653,6 +540,30 @@ Descripción: [description]`,
     }
 });
 
+const systemTicketAgent = new Agent({
+    name: "System Ticket Agent",
+    instructions: `You are a helper agent. Use 'Crear_ticket' to create the ticket requested. 
+    USE THESE EXACT PARAMETERS:
+    - fieldValues0_Field_Value: "asesor_humano"
+    - fieldValues1_Field_Value: "URG"
+    - fieldValues2_Field_Value: "abierto"
+    - fieldValues3_Field_Value: "urgente"
+    - fieldValues5_Field_Value: Title
+    - fieldValues6_Field_Value: Description
+    - fieldValues7_Field_Value: "Usuario No Identificado"
+    - fieldValues8_Field_Value: "0"
+    - fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a"
+
+    If successful, output ONLY the folio number.
+    If 'Crear_ticket' fails or returns an error, output a fallback folio in the format: CEA-URG-YYMMDD-9999 (use current date).`,
+    model: "gpt-4o-mini",
+    tools: [mcp],
+    modelSettings: {
+        temperature: 0.1,
+        store: false
+    }
+});
+
 // Main workflow function
 export const runWorkflow = async (workflow: WorkflowInput): Promise<WorkflowOutput> => {
     return await withTrace("Maria V1", async () => {
@@ -719,18 +630,27 @@ export const runWorkflow = async (workflow: WorkflowInput): Promise<WorkflowOutp
             if (!output) throw new Error(`Agent result is undefined.Result: ${JSON.stringify(result)} `);
             agentResult = { output_text: output };
         } else if (classification === "hablar_asesor") {
-            // Create urgent ticket for human advisor
+            // Create urgent ticket for human advisor using system agent
             try {
-                const ticketResult = await performCreateTicket({
+                const ticketData = {
                     service_type: "urgente",
                     titulo: "Solicitud de asesor humano",
                     descripcion: `Usuario solicitó hablar con un asesor humano. Mensaje: ${workflow.input_as_text}`,
                     contract_number: null,
                     email: null,
                     ubicacion: null
-                });
+                };
 
-                const folio = ticketResult.success ? ticketResult.folio : "PENDING";
+                const sysResult = await runWithAutoApproval(runner, systemTicketAgent, [
+                    ...conversationHistory,
+                    { role: "user", content: `Create this ticket internally: ${JSON.stringify(ticketData)}` }
+                ]);
+
+                const output = getAgentOutput(sysResult);
+                // Extract folio from output (it should be just the folio or contain it)
+                const folioMatch = output?.match(/(CEA-[A-Z]+-\d+-\d+)/);
+                const folio = folioMatch ? folioMatch[1] : (output || "PENDING");
+
                 agentResult = {
                     output_text: `He creado tu solicitud con el folio ${folio}. Te conectaré con un asesor humano. Por favor espera un momento.`
                 };
