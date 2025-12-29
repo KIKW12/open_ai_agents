@@ -392,6 +392,8 @@ For disputes, create ticket with 'Crear_ticket' using:
 - fieldValues1_Field_Value: "PAG"
 - fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a" (or lookup customer first)
 - fieldValues8_Field_Value: Contract Number (required)
+- fieldValues10_Field_Value: The conversation_id from the context (if available)
+- fieldValues11_Field_Value: The client_id from the context (if available)
 
 Do not retrieve contracts by name or address - contract number only.`,
     model: "gpt-4.1",
@@ -428,6 +430,8 @@ If user disputes consumption or suspects meter reading error:
     - fieldValues7_Field_Value: Name (or "Usuario No Identificado")
     - fieldValues8_Field_Value: Contract Number
     - fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a" (or lookup customer first)
+    - fieldValues10_Field_Value: The conversation_id from the context (if available)
+    - fieldValues11_Field_Value: The client_id from the context (if available)
 4. The tool returns the folio. Include it in your response to the user.`,
     model: "gpt-4.1",
     tools: [mcp],
@@ -461,6 +465,8 @@ Cuando tengas toda la info, usa 'Crear_ticket' con estos parametros EXACTOS:
 - fieldValues7_Field_Value: "Usuario No Identificado" (si no tienes nombre)
 - fieldValues8_Field_Value: "0" (si no tienes contrato)
 - fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a" (ID genérico si no tienes uno específico)
+- fieldValues10_Field_Value: El conversation_id del contexto (si está disponible)
+- fieldValues11_Field_Value: El client_id del contexto (si está disponible)
 
     El tool te devolverá el resultado. Si recibes un folio en la respuesta, comunícaselo al usuario.
     Ejemplo: "He creado tu reporte con el folio [FOLIO]. Un técnico se pondrá en contacto contigo pronto."
@@ -553,6 +559,8 @@ const systemTicketAgent = new Agent({
     - fieldValues7_Field_Value: "Usuario No Identificado"
     - fieldValues8_Field_Value: "0"
     - fieldValues9_Field_Value: "00d7d94c-a0ac-4b55-8767-5a553d80b39a"
+    - fieldValues10_Field_Value: The conversation_id from the context (if available)
+    - fieldValues11_Field_Value: The client_id from the context (if available)
 
     If successful, output ONLY the folio number.
     If 'Crear_ticket' fails or returns an error, output a fallback folio in the format: CEA-URG-YYMMDD-9999 (use current date).`,
@@ -571,7 +579,12 @@ export const runWorkflow = async (workflow: WorkflowInput): Promise<WorkflowOutp
         const previousHistory = (workflow.conversationId && conversationStore.get(workflow.conversationId)) || [];
 
         const now = new Date().toLocaleString("es-MX", { timeZone: "America/Mexico_City" });
-        const inputWithContext = `[Contexto: La fecha y hora actual es ${now}]\n\n${workflow.input_as_text} `;
+        const contextParts = [
+            `La fecha y hora actual es ${now}`,
+            workflow.conversationId ? `conversation_id: ${workflow.conversationId}` : null,
+            workflow.clientId ? `client_id: ${workflow.clientId}` : null
+        ].filter(Boolean);
+        const inputWithContext = `[Contexto: ${contextParts.join(', ')}]\n\n${workflow.input_as_text} `;
 
         const conversationHistory: AgentInputItem[] = [
             ...previousHistory,

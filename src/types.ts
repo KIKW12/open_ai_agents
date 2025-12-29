@@ -1,6 +1,7 @@
 export interface ChatRequest {
     message: string;
     conversationId?: string;
+    clientId?: string;
 }
 
 export interface ChatResponse {
@@ -22,6 +23,7 @@ export type TicketType =
 export interface WorkflowInput {
     input_as_text: string;
     conversationId?: string;
+    clientId?: string;
 }
 
 export interface WorkflowOutput {

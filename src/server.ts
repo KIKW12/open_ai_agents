@@ -26,7 +26,7 @@ const chatHandler = async (req: express.Request, res: express.Response) => {
     console.log(`[${requestId}] Body:`, JSON.stringify(req.body, null, 2));
 
     try {
-        const { message, conversationId } = req.body as ChatRequest;
+        const { message, conversationId, clientId } = req.body as ChatRequest;
 
         if (!message) {
             console.log(`[${requestId}] ERROR: Missing message field`);
@@ -38,12 +38,15 @@ const chatHandler = async (req: express.Request, res: express.Response) => {
         }
 
         console.log(`[${requestId}] Processing message: "${message}"`);
+        console.log(`[${requestId}] ConversationId: ${conversationId || 'not provided'}`);
+        console.log(`[${requestId}] ClientId: ${clientId || 'not provided'}`);
 
         // Run the agent workflow
         console.log(`[${requestId}] Calling runWorkflow...`);
         const result = await runWorkflow({
             input_as_text: message,
-            conversationId: conversationId
+            conversationId: conversationId,
+            clientId: clientId
         });
         console.log(`[${requestId}] Workflow completed`);
 
